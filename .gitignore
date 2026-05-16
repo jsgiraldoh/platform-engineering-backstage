@@ -28,3 +28,6 @@ backstage-app/backstage/app-config.local.yaml
 .env
 .env.local
 .env*.local
+
+# OAuth credentials
+OAuth.txt
