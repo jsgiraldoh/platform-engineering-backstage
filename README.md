@@ -522,7 +522,7 @@ metadata:
 spec:
   profile:
     displayName: Johan Giraldo
-    email: johansebastiangh@gmail.com
+    email: tu@email.com
   memberOf: []
 ```
 
