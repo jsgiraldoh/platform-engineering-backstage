@@ -1,0 +1,30 @@
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V8
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.yarn/cache
+.pnp.*
+
+# Backstage build artifacts
+backstage-app/backstage/dist/
+backstage-app/backstage/.cache/
+backstage-app/backstage/packages/app/dist/
+backstage-app/backstage/packages/backend/dist/
+
+# Backstage local config (contains secrets)
+backstage-app/backstage/app-config.local.yaml
+
+# Environment files
+.env
+.env.local
+.env*.local
