@@ -157,8 +157,8 @@ docker push jsgiraldoh/img-example-platform-eng:latest
 ### Crear el clúster Kind
 
 ```bash
-kind create cluster --name platformengineering
-kubectl cluster-info --context kind-platformengineering
+kind create cluster --name platform-engineering
+kubectl cluster-info --context kind-platform-engineering
 kubectl get nodes
 ```
 
@@ -582,7 +582,7 @@ yarn start --config /app/backstage/app-config.local.yaml
 docker rm -f $(docker ps -aq)
 
 # Eliminar el clúster Kind
-kind delete cluster --name platformengineering
+kind delete cluster --name platform-engineering
 
 # Desinstalar releases Helm
 helm uninstall platform-engineering
