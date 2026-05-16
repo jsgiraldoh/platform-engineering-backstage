@@ -9,13 +9,15 @@ Guía completa para evolucionar desde despliegues manuales hacia un modelo moder
 1. [Arquitectura](#arquitectura)
 2. [Pre-requisitos](#pre-requisitos)
 3. [Estructura del repositorio](#estructura-del-repositorio)
-4. [Parte 1 — Aplicación containerizada](#parte-1--aplicación-containerizada)
-5. [Parte 2 — Kubernetes con manifiestos planos](#parte-2--kubernetes-con-manifiestos-planos)
-6. [Parte 3 — Helm Chart](#parte-3--helm-chart)
-7. [Parte 4 — GitOps con Argo CD](#parte-4--gitops-con-argo-cd)
-8. [Parte 5 — CI/CD con GitHub Actions](#parte-5--cicd-con-github-actions)
-9. [Parte 6 — Backstage como IDP](#parte-6--backstage-como-idp)
-10. [Variables y secretos requeridos](#variables-y-secretos-requeridos)
+4. [Parte 1 — Clonar y configurar el repositorio](#parte-1--clonar-y-configurar-el-repositorio)
+5. [Parte 2 — Aplicación containerizada](#parte-2--aplicación-containerizada)
+6. [Parte 3 — Kubernetes con manifiestos planos](#parte-3--kubernetes-con-manifiestos-planos)
+7. [Parte 4 — Helm Chart](#parte-4--helm-chart)
+8. [Parte 5 — GitOps con Argo CD](#parte-5--gitops-con-argo-cd)
+9. [Parte 6 — CI/CD con GitHub Actions](#parte-6--cicd-con-github-actions)
+10. [Parte 7 — Backstage como IDP](#parte-7--backstage-como-idp)
+11. [Variables y secretos requeridos](#variables-y-secretos-requeridos)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -54,7 +56,9 @@ Guía completa para evolucionar desde despliegues manuales hacia un modelo moder
 | Helm | 3.12+ | `winget install Helm.Helm` |
 | Git | 2.40+ | `winget install Git.Git` |
 
-> **Windows + Git Bash**: todos los comandos Docker con rutas de volumen requieren el prefijo `MSYS_NO_PATHCONV=1` o usar doble slash `//` para evitar que Git Bash convierta las rutas.
+> **Chocolatey en Windows**: los comandos `choco install` / `choco upgrade` requieren una terminal con **"Ejecutar como administrador"**. Sin permisos de admin fallará con "Acceso denegado".
+
+> **Git Bash en Windows**: el comando `watch` no existe. Para monitorear pods usa `kubectl get pods` repetido o `kubectl get pods -w` (solo funciona con un tipo de recurso a la vez).
 
 ---
 
@@ -80,37 +84,75 @@ platform-engineering-backstage/
 │   ├── index.html               # Aplicación web estática
 │   └── fondo.png
 ├── argocd.yaml                  # Application CRD para Argo CD
-└── Dockerfile                   # Imagen nginx:alpine
+├── Dockerfile                   # Imagen nginx:alpine
+└── .gitignore
 ```
 
 ---
 
-## Parte 1 — Aplicación containerizada
+## Parte 1 — Clonar y configurar el repositorio
+
+Clonar el repositorio base del taller y apuntarlo a tu propio repositorio:
+
+```bash
+git clone https://github.com/roko1987-k8s/platform-engineering-backstage.git
+cd platform-engineering-backstage
+
+git remote remove origin
+git remote add origin https://github.com/<TU-USUARIO>/platform-engineering-backstage.git
+git branch -M main
+git push -u origin main
+```
+
+Configurar tu identidad de Git (si aún no lo tienes):
+
+```bash
+git config --global user.name "tu-usuario"
+git config --global user.email "tu@email.com"
+```
+
+---
+
+## Parte 2 — Aplicación containerizada
 
 ### Construir la imagen
 
 ```bash
-docker build -t platform-engineering .
+docker build -t img-example-platform-eng .
 ```
 
 ### Validar localmente
 
 ```bash
-docker run -d -p 8080:80 --name app platform-engineering
+docker run -d -p 8080:80 --name app img-example-platform-eng
 # Abrir http://localhost:8080
 ```
 
-### Publicar en Docker Hub
+### Login en Docker Hub
+
+> **Importante**: el login con `-u user` usando un Personal Access Token (PAT) puede fallar con `authentication required - access token has insufficient scopes`. Usa el login web en su lugar:
 
 ```bash
+# Recomendado: login vía navegador (evita problemas de scopes con PAT)
 docker login
-docker tag platform-engineering jsgiraldoh/img-example-platform-eng
-docker push jsgiraldoh/img-example-platform-eng
+# Sigue las instrucciones del navegador
+
+# Alternativa con contraseña real (no PAT):
+docker login -u <tu-usuario>
 ```
+
+### Etiquetar y publicar
+
+```bash
+docker tag img-example-platform-eng:latest jsgiraldoh/img-example-platform-eng:latest
+docker push jsgiraldoh/img-example-platform-eng:latest
+```
+
+> **Asegúrate de que el push fue exitoso antes de continuar.** Si aplicas los manifiestos de Kubernetes antes de que la imagen esté en Docker Hub, obtendrás `ImagePullBackOff`.
 
 ---
 
-## Parte 2 — Kubernetes con manifiestos planos
+## Parte 3 — Kubernetes con manifiestos planos
 
 ### Crear el clúster Kind
 
@@ -122,18 +164,31 @@ kubectl get nodes
 
 ### Desplegar con manifiestos planos
 
-```bash
-kubectl apply -f k8s/deployment.yaml
-kubectl apply -f k8s/service.yaml
+Los manifiestos están en `k8s/`. Ejecutar desde la raíz del repositorio:
 
+```bash
+kubectl apply -f k8s/
 kubectl get pods
 kubectl get svc
 ```
 
-### Acceder a la aplicación
+### Verificar el estado del pod
 
 ```bash
-kubectl port-forward svc/platform-engineering 8070:8080
+# Monitorear (Git Bash no tiene 'watch', usar -w con recurso único)
+kubectl get pods -w
+
+# Ver detalle si hay errores
+kubectl describe pod <nombre-del-pod>
+kubectl logs <nombre-del-pod>
+```
+
+### Acceder a la aplicación
+
+El Service de `k8s/service.yaml` expone el puerto **80**:
+
+```bash
+kubectl port-forward svc/platform-engineering 8070:80
 # Abrir http://localhost:8070
 ```
 
@@ -145,11 +200,15 @@ kubectl delete -f k8s/
 
 ---
 
-## Parte 3 — Helm Chart
+## Parte 4 — Helm Chart
 
-El chart se encuentra en `platform-engineering/`. Parametriza imagen, réplicas y puertos vía `values.yaml`.
+El chart se encuentra en `platform-engineering/`. Todos los comandos de Helm deben ejecutarse **desde dentro de ese directorio**.
 
-### Valores configurables (`platform-engineering/values.yaml`)
+```bash
+cd platform-engineering/
+```
+
+### Valores configurables (`values.yaml`)
 
 ```yaml
 replicaCount: 1
@@ -171,27 +230,34 @@ service:
 ### Validar templates sin desplegar
 
 ```bash
-helm template platform-engineering ./platform-engineering
+# Desde dentro de platform-engineering/
+helm template platform-engineering .
 ```
 
 ### Instalar el Chart
 
 ```bash
-helm install platform-engineering ./platform-engineering
+# Desde dentro de platform-engineering/
+helm install platform-engineering .
 helm ls
-kubectl get pods
+kubectl get all
 ```
+
+### Acceder a la aplicación
+
+El Service del Helm chart expone el puerto **8080** (definido en `values.yaml`):
+
+```bash
+kubectl port-forward svc/platform-engineering 8080:8080
+# Abrir http://localhost:8080
+```
+
+> Nota: aunque el port-forward dice `8080:8080`, internamente Kubernetes redirige al `targetPort: 80` del contenedor.
 
 ### Actualizar tras cambios
 
 ```bash
-helm upgrade platform-engineering ./platform-engineering
-```
-
-### Acceder
-
-```bash
-kubectl port-forward svc/platform-engineering 8070:8080
+helm upgrade platform-engineering .
 ```
 
 ### Desinstalar
@@ -202,36 +268,46 @@ helm uninstall platform-engineering
 
 ---
 
-## Parte 4 — GitOps con Argo CD
+## Parte 5 — GitOps con Argo CD
 
 Argo CD sincroniza automáticamente el estado del clúster con el Helm Chart en Git.
 
 ### Instalar Argo CD
+
+> **Importante**: `helm repo update` es **obligatorio** antes de instalar. Sin él obtendrás el error `no cached repo found`.
 
 ```bash
 helm repo add argo https://argoproj.github.io/argo-helm
 helm repo update
 kubectl create namespace argocd
 helm install argocd argo/argo-cd -n argocd
+```
+
+Verificar que todos los pods estén corriendo:
+
+```bash
 kubectl get pods -n argocd -w
 ```
 
-### Acceder a la UI
+### Acceder a la UI de Argo CD
+
+Argo CD usa HTTPS en el puerto 443. Mapearlo a un puerto local diferente para no chocar con la app:
 
 ```bash
 kubectl port-forward svc/argocd-server -n argocd 8081:443
-# Abrir https://localhost:8081  (usuario: admin)
+# Abrir https://localhost:8081 (aceptar el certificado autofirmado)
+# Usuario: admin
 ```
 
 ### Obtener la contraseña inicial
 
 ```bash
-# Linux/macOS
-kubectl get secret argocd-initial-admin-secret -n argocd \
+# Git Bash / Linux / macOS
+kubectl -n argocd get secret argocd-initial-admin-secret \
   -o jsonpath="{.data.password}" | base64 -d
 
-# Windows PowerShell
-kubectl get secret argocd-initial-admin-secret -n argocd `
+# PowerShell
+kubectl -n argocd get secret argocd-initial-admin-secret `
   -o jsonpath="{.data.password}" | `
   ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($_)) }
 ```
@@ -242,7 +318,7 @@ kubectl get secret argocd-initial-admin-secret -n argocd `
 kubectl create -f argocd.yaml
 ```
 
-El archivo `argocd.yaml` apunta al path `platform-engineering/` de este repositorio:
+El archivo `argocd.yaml` en la raíz del repositorio:
 
 ```yaml
 apiVersion: argoproj.io/v1alpha1
@@ -267,11 +343,11 @@ spec:
       - CreateNamespace=true
 ```
 
-Cada `git push` a `main` que modifique `platform-engineering/values.yaml` disparará un reconcile automático en Argo CD.
+Cada `git push` a `main` que modifique `platform-engineering/values.yaml` (por ejemplo, el tag de imagen) disparará un reconcile automático en Argo CD.
 
 ---
 
-## Parte 5 — CI/CD con GitHub Actions
+## Parte 6 — CI/CD con GitHub Actions
 
 El workflow `.github/workflows/ci-cd.yaml` automatiza el ciclo completo:
 
@@ -293,26 +369,25 @@ push a main
 
 ### Configurar secretos en GitHub
 
-Ir a: `Repositorio → Settings → Secrets and variables → Actions`
+Ir a: `Repositorio → Settings → Secrets and variables → Actions → New repository secret`
 
 | Secret | Valor |
 |--------|-------|
 | `REGISTRY_USERNAME` | Tu usuario de Docker Hub |
-| `REGISTRY_PASSWORD` | Token de acceso de Docker Hub |
+| `REGISTRY_PASSWORD` | Token de acceso de Docker Hub con permisos **Read & Write** |
 
-Para crear el token: Docker Hub → Account Settings → Security → New Access Token (permisos: `Read & Write`).
-
-> El workflow también necesita que el repositorio tenga habilitado el permiso `contents: write` (ya está configurado en el YAML).
+Para crear el token: Docker Hub → Account Settings → Security → New Access Token.
 
 ---
 
-## Parte 6 — Backstage como IDP
+## Parte 7 — Backstage como IDP
 
 Backstage corre dentro de un contenedor Docker montando `backstage-app/` como volumen, lo que permite editar los archivos desde el host y ver los cambios en tiempo real.
 
 ### Iniciar el contenedor de desarrollo
 
-**Git Bash (Windows):**
+**Git Bash (Windows) — opción recomendada:**
+
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm \
   --platform=linux/amd64 \
@@ -326,6 +401,7 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 ```
 
 **PowerShell:**
+
 ```powershell
 docker run --rm `
   --platform=linux/amd64 `
@@ -333,7 +409,7 @@ docker run --rm `
   -e AUTH_GITHUB_CLIENT_ID=<tu-client-id> `
   -e AUTH_GITHUB_CLIENT_SECRET=<tu-client-secret> `
   -ti `
-  -v "D:\PlatformEngineering\platform-engineering-backstage\backstage-app:/app" `
+  -v "D:\PlatformEngineering\platform-engineering-backstage\backstage-app://app" `
   -w //app `
   node:20-bookworm-slim bash
 ```
@@ -349,6 +425,7 @@ apt update && apt install -y python3 make g++ build-essential
 ```bash
 corepack enable
 npx @backstage/create-app@latest --path backstage --skip-install
+# Cuando pregunte el nombre de la app: backstage
 ```
 
 ### Instalar dependencias de Node
@@ -358,16 +435,32 @@ cd backstage
 yarn install
 ```
 
-### Configurar acceso externo (`app-config.yaml`)
+### Iniciar Backstage (modo básico)
 
-Agregar bajo la sección `backend`:
+```bash
+yarn start
+# Frontend: http://localhost:3000
+```
+
+### Configurar acceso externo
+
+Modificar `backstage/app-config.yaml`, agregar bajo `backend`:
+
 ```yaml
 backend:
   listen:
     host: 0.0.0.0
 ```
 
-### Crear `app-config.local.yaml` para desarrollo local
+### Configurar autenticación GitHub OAuth
+
+1. Ir a GitHub → Settings → Developer Settings → OAuth Apps → **New OAuth App**
+2. Completar:
+   - **Homepage URL**: `http://localhost:3000`
+   - **Authorization callback URL**: `http://localhost:7007/api/auth/github/handler/frame`
+3. Generar un Client Secret y guardar ambos valores.
+
+### Crear `app-config.local.yaml` (contiene secretos, no se sube al repo)
 
 ```yaml
 app:
@@ -401,14 +494,6 @@ catalog:
       target: /app/backstage/users/user.yaml
 ```
 
-### Configurar autenticación GitHub OAuth
-
-1. Ir a GitHub → Settings → Developer Settings → OAuth Apps → New OAuth App
-2. Configurar:
-   - **Homepage URL**: `http://localhost:3000`
-   - **Authorization callback URL**: `http://localhost:7007/api/auth/github/handler/frame`
-3. Generar el Client Secret y guardar ambos valores como variables de entorno al levantar el contenedor.
-
 ### Instalar plugin de autenticación GitHub en el backend
 
 ```bash
@@ -416,6 +501,7 @@ yarn --cwd packages/backend add @backstage/plugin-auth-backend-module-github-pro
 ```
 
 Agregar en `packages/backend/src/index.ts`:
+
 ```ts
 backend.add(import('@backstage/plugin-auth-backend-module-github-provider'));
 ```
@@ -427,6 +513,7 @@ mkdir backstage/users
 ```
 
 Crear `backstage/users/user.yaml`:
+
 ```yaml
 apiVersion: backstage.io/v1alpha1
 kind: User
@@ -439,23 +526,12 @@ spec:
   memberOf: []
 ```
 
-### Iniciar Backstage
+### Iniciar Backstage con config local
 
 ```bash
 yarn start --config /app/backstage/app-config.local.yaml
 # Frontend: http://localhost:3000
 # Backend:  http://localhost:7007
-```
-
-### Instalar plugins adicionales
-
-```bash
-yarn add --cwd packages/app \
-  @backstage/plugin-scaffolder \
-  @backstage/plugin-search \
-  @backstage/plugin-techdocs \
-  @backstage/plugin-home \
-  @backstage/plugin-user-settings
 ```
 
 ---
@@ -476,11 +552,26 @@ yarn add --cwd packages/app \
 ```
 1. Modificar src/index.html (o cualquier archivo de la app)
 2. git add . && git commit -m "feat: ..." && git push origin main
-3. GitHub Actions (CI) construye imagen y hace push a Docker Hub con tag = commit SHA (6 chars)
+3. GitHub Actions (CI) construye imagen y hace push a Docker Hub con tag = SHA (6 chars)
 4. GitHub Actions (CD) actualiza platform-engineering/values.yaml con el nuevo tag y hace commit
-5. Argo CD detecta el cambio en Git y sincroniza el clúster Kubernetes automáticamente
+5. Argo CD detecta el cambio en Git y sincroniza el clúster automáticamente
 6. El nuevo pod arranca con la imagen actualizada
 ```
+
+---
+
+## Troubleshooting
+
+| Error | Causa | Solución |
+|-------|-------|----------|
+| `ImagePullBackOff` | La imagen no existe en Docker Hub cuando se aplicaron los manifiestos | Hacer `docker push` primero, luego `kubectl apply` |
+| `authentication required - access token has insufficient scopes` | PAT de Docker Hub sin permisos suficientes | Usar `docker login` (web-based) en lugar de `docker login -u user` |
+| `no cached repo found` en Helm | Falta ejecutar `helm repo update` | Ejecutar `helm repo update` antes de `helm install` |
+| `unable to detect chart` en `helm template` | Ejecutar el comando desde la raíz en lugar del directorio del chart | Entrar a `cd platform-engineering/` antes de ejecutar comandos de Helm |
+| `Service does not have a service port 80` en port-forward | El Service del Helm chart usa puerto 8080, no 80 | Usar `kubectl port-forward svc/platform-engineering 8080:8080` |
+| `watch: command not found` | `watch` no existe en Git Bash | Usar `kubectl get pods` repetido o `kubectl get pods -w` |
+| `error: you may only specify a single resource type` | `-w` no funciona con `kubectl get all` | Usar `kubectl get pods -w` (un solo tipo de recurso) |
+| Chocolatey `Acceso denegado` | Sin permisos de administrador | Abrir Git Bash / PowerShell como **Administrador** |
 
 ---
 
@@ -496,4 +587,5 @@ kind delete cluster --name platformengineering
 # Desinstalar releases Helm
 helm uninstall platform-engineering
 helm uninstall argocd -n argocd
+kubectl delete namespace argocd
 ```
