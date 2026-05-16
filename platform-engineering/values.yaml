@@ -1,14 +1,10 @@
 replicaCount: 1
-
 app:
   name: platform-engineering
-
 image:
   repository: jsgiraldoh/img-example-platform-eng
-  tag: latest
-
+  tag: 1fbb44
 containerPort: 80
-
 service:
   port: 8080
   targetPort: 80
