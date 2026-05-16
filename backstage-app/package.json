@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@aws-sdk/client-sts": "^3.1047.0",
+    "@aws-sdk/credential-providers": "^3.1048.0",
+    "@aws-sdk/region-config-resolver": "^3.972.15",
+    "@backstage/plugin-notifications": "^0.5.16",
+    "@backstage/plugin-notifications-backend": "^0.6.4"
+  }
+}
