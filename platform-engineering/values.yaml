@@ -3,7 +3,7 @@ app:
   name: platform-engineering
 image:
   repository: jsgiraldoh/img-example-platform-eng
-  tag: '176950'
+  tag: '94666a'
 containerPort: 80
 service:
   port: 8080
