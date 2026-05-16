@@ -1,0 +1,65 @@
+name: CI-CD
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    outputs:
+      commit_id: ${{ steps.vars.outputs.commit_id }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Declare some variables
+        id: vars
+        shell: bash
+        run: |
+          echo "COMMIT_ID=${GITHUB_SHA::6}" >> "$GITHUB_ENV"
+          echo "commit_id=${GITHUB_SHA::6}" >> "$GITHUB_OUTPUT"
+      
+      - name: Login Docker
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: jsgiraldoh/img-example-platform-eng:${{ steps.vars.outputs.commit_id }}
+
+  cd:
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Modify values file
+        shell: bash
+        run: |
+          pip install yq
+          yq -Yi ".image.tag = \"${{ needs.ci.outputs.commit_id }}\"" platform-engineering/values.yaml
+          cat platform-engineering/values.yaml
+
+      - name: Commit changes
+        run: |
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
+
+          git add platform-engineering/values.yaml
+          git commit -m "Update image tag to ${{ needs.ci.outputs.commit_id }}" || echo "No changes"
+
+          git push
