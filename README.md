@@ -384,7 +384,28 @@ Para crear el token: Docker Hub → Account Settings → Security → New Access
 
 Backstage corre dentro de un contenedor Docker montando `backstage-app/` como volumen, lo que permite editar los archivos desde el host y ver los cambios en tiempo real.
 
+### Configurar autenticación GitHub OAuth
+
+> **Crítico**: debes crear una **OAuth App**, NO una GitHub App. Son secciones distintas en GitHub.
+
+1. Ir a: `GitHub → Settings → Developer Settings → OAuth Apps → New OAuth App`
+2. Completar exactamente:
+
+| Campo | Valor |
+|-------|-------|
+| Application name | Backstage Local |
+| Homepage URL | `http://localhost:3000` |
+| Authorization callback URL | `http://localhost:7007/api/auth/github/handler/frame` |
+
+3. Hacer clic en **Register application**
+4. Hacer clic en **Generate a new client secret**
+5. Copiar tanto el **Client ID** como el **Client Secret** (el secret solo se muestra una vez)
+
+> **Atención con el Client ID**: cópialo completo. Un carácter faltante al final causará un `404` en GitHub durante el login. Verifica con `echo $AUTH_GITHUB_CLIENT_ID` dentro del contenedor.
+
 ### Iniciar el contenedor de desarrollo
+
+El volumen se monta en `/app` pero el working directory debe apuntar a `/app/backstage` donde vive la aplicación.
 
 **Git Bash (Windows) — opción recomendada:**
 
@@ -392,11 +413,11 @@ Backstage corre dentro de un contenedor Docker montando `backstage-app/` como vo
 MSYS_NO_PATHCONV=1 docker run --rm \
   --platform=linux/amd64 \
   -p 3000:3000 -p 7007:7007 \
-  -e AUTH_GITHUB_CLIENT_ID=<tu-client-id> \
-  -e AUTH_GITHUB_CLIENT_SECRET=<tu-client-secret> \
+  -e AUTH_GITHUB_CLIENT_ID="<tu-client-id-completo>" \
+  -e AUTH_GITHUB_CLIENT_SECRET="<tu-client-secret>" \
   -ti \
   -v "D:/PlatformEngineering/platform-engineering-backstage/backstage-app:/app" \
-  -w /app \
+  -w //app/backstage \
   node:20-bookworm-slim bash
 ```
 
@@ -406,12 +427,19 @@ MSYS_NO_PATHCONV=1 docker run --rm \
 docker run --rm `
   --platform=linux/amd64 `
   -p 3000:3000 -p 7007:7007 `
-  -e AUTH_GITHUB_CLIENT_ID=<tu-client-id> `
-  -e AUTH_GITHUB_CLIENT_SECRET=<tu-client-secret> `
+  -e AUTH_GITHUB_CLIENT_ID="<tu-client-id-completo>" `
+  -e AUTH_GITHUB_CLIENT_SECRET="<tu-client-secret>" `
   -ti `
   -v "D:\PlatformEngineering\platform-engineering-backstage\backstage-app://app" `
-  -w //app `
+  -w //app/backstage `
   node:20-bookworm-slim bash
+```
+
+Verificar que las variables llegaron correctamente antes de continuar:
+
+```bash
+echo $AUTH_GITHUB_CLIENT_ID
+echo $AUTH_GITHUB_CLIENT_SECRET
 ```
 
 ### Instalar dependencias del sistema (dentro del contenedor)
@@ -423,6 +451,8 @@ apt update && apt install -y python3 make g++ build-essential
 ### Crear la aplicación Backstage
 
 ```bash
+# Desde /app (raíz del volumen)
+cd /app
 corepack enable
 npx @backstage/create-app@latest --path backstage --skip-install
 # Cuando pregunte el nombre de la app: backstage
@@ -431,20 +461,13 @@ npx @backstage/create-app@latest --path backstage --skip-install
 ### Instalar dependencias de Node
 
 ```bash
-cd backstage
+cd /app/backstage
 yarn install
 ```
 
-### Iniciar Backstage (modo básico)
+### Configurar acceso externo en `app-config.yaml`
 
-```bash
-yarn start
-# Frontend: http://localhost:3000
-```
-
-### Configurar acceso externo
-
-Modificar `backstage/app-config.yaml`, agregar bajo `backend`:
+Agregar bajo la sección `backend` en `backstage/app-config.yaml`:
 
 ```yaml
 backend:
@@ -452,36 +475,42 @@ backend:
     host: 0.0.0.0
 ```
 
-### Configurar autenticación GitHub OAuth
+### Crear `app-config.local.yaml`
 
-1. Ir a GitHub → Settings → Developer Settings → OAuth Apps → **New OAuth App**
-2. Completar:
-   - **Homepage URL**: `http://localhost:3000`
-   - **Authorization callback URL**: `http://localhost:7007/api/auth/github/handler/frame`
-3. Generar un Client Secret y guardar ambos valores.
-
-### Crear `app-config.local.yaml` (contiene secretos, no se sube al repo)
+Este archivo contiene secretos y **no se sube al repositorio** (está en `.gitignore`). Crearlo en `backstage/app-config.local.yaml`:
 
 ```yaml
 app:
-  title: Taller Platform Engineering con Backstage
   baseUrl: http://localhost:3000
   listen:
+    port: 3000
     host: 0.0.0.0
 
 backend:
+  auth:
+    keys:
+      - secret: <cadena-aleatoria-para-firmar-tokens>
+
   baseUrl: http://localhost:7007
+
   listen:
     port: 7007
     host: 0.0.0.0
 
+  cors:
+    origin: http://localhost:3000
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+
 auth:
   environment: development
+
   providers:
     github:
       development:
         clientId: ${AUTH_GITHUB_CLIENT_ID}
         clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+
         signIn:
           resolvers:
             - resolver: usernameMatchingUserEntityName
@@ -489,6 +518,7 @@ auth:
 catalog:
   rules:
     - allow: [User, Component, System, API, Resource, Location]
+
   locations:
     - type: file
       target: /app/backstage/users/user.yaml
@@ -497,19 +527,23 @@ catalog:
 ### Instalar plugin de autenticación GitHub en el backend
 
 ```bash
+cd /app/backstage
 yarn --cwd packages/backend add @backstage/plugin-auth-backend-module-github-provider
 ```
 
-Agregar en `packages/backend/src/index.ts`:
+Agregar la siguiente línea en `packages/backend/src/index.ts` dentro del bloque `// auth plugin`:
 
 ```ts
-backend.add(import('@backstage/plugin-auth-backend-module-github-provider'));
+// auth plugin
+backend.add(import('@backstage/plugin-auth-backend'));
+backend.add(import('@backstage/plugin-auth-backend-module-github-provider')); // <- línea agregada
+backend.add(import('@backstage/plugin-auth-backend-module-guest-provider'));
 ```
 
 ### Crear usuario en el catálogo
 
 ```bash
-mkdir backstage/users
+mkdir -p /app/backstage/users
 ```
 
 Crear `backstage/users/user.yaml`:
@@ -518,21 +552,40 @@ Crear `backstage/users/user.yaml`:
 apiVersion: backstage.io/v1alpha1
 kind: User
 metadata:
-  name: jsgiraldoh
+  name: <tu-usuario-github>
 spec:
   profile:
-    displayName: Johan Giraldo
+    displayName: <Tu Nombre Completo>
     email: tu@email.com
   memberOf: []
 ```
 
-### Iniciar Backstage con config local
+> El campo `metadata.name` debe coincidir exactamente con tu nombre de usuario de GitHub, ya que el resolver `usernameMatchingUserEntityName` lo usa para hacer match al autenticarse.
+
+### Iniciar Backstage con ambas configuraciones
 
 ```bash
-yarn start --config /app/backstage/app-config.local.yaml
-# Frontend: http://localhost:3000
-# Backend:  http://localhost:7007
+cd /app/backstage
+yarn start \
+  --config /app/backstage/app-config.yaml \
+  --config /app/backstage/app-config.local.yaml
 ```
+
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:7007`
+
+### Verificar que el backend funciona correctamente
+
+En los logs del backend busca estas líneas — confirman que la autenticación está bien configurada:
+
+```
+info: Configuring auth provider: github    ← provider cargado correctamente
+GET /api/auth/github/refresh ... 401       ← NORMAL antes de iniciar sesión
+GET /api/auth/github/start   ... 302       ← CORRECTO: redirige a GitHub OAuth
+```
+
+> El `401` en `/refresh` **no es un error**. Solo indica que no hay sesión activa todavía.
+> El `302` en `/start` confirma que Backstage está generando la redirección OAuth correctamente.
 
 ---
 
@@ -562,9 +615,11 @@ yarn start --config /app/backstage/app-config.local.yaml
 
 ## Troubleshooting
 
+### Docker / Kubernetes / Helm
+
 | Error | Causa | Solución |
 |-------|-------|----------|
-| `ImagePullBackOff` | La imagen no existe en Docker Hub cuando se aplicaron los manifiestos | Hacer `docker push` primero, luego `kubectl apply` |
+| `ImagePullBackOff` | La imagen no existe en Docker Hub al aplicar los manifiestos | Hacer `docker push` primero, luego `kubectl apply` |
 | `authentication required - access token has insufficient scopes` | PAT de Docker Hub sin permisos suficientes | Usar `docker login` (web-based) en lugar de `docker login -u user` |
 | `no cached repo found` en Helm | Falta ejecutar `helm repo update` | Ejecutar `helm repo update` antes de `helm install` |
 | `unable to detect chart` en `helm template` | Ejecutar el comando desde la raíz en lugar del directorio del chart | Entrar a `cd platform-engineering/` antes de ejecutar comandos de Helm |
@@ -572,6 +627,17 @@ yarn start --config /app/backstage/app-config.local.yaml
 | `watch: command not found` | `watch` no existe en Git Bash | Usar `kubectl get pods` repetido o `kubectl get pods -w` |
 | `error: you may only specify a single resource type` | `-w` no funciona con `kubectl get all` | Usar `kubectl get pods -w` (un solo tipo de recurso) |
 | Chocolatey `Acceso denegado` | Sin permisos de administrador | Abrir Git Bash / PowerShell como **Administrador** |
+
+### Backstage — GitHub OAuth
+
+| Síntoma | Causa | Solución |
+|---------|-------|----------|
+| GitHub devuelve `404 This is not the web page you are looking for` al hacer login | Estás usando una **GitHub App** en lugar de una **OAuth App** | Ir a `Developer Settings → OAuth Apps` (no GitHub Apps) y crear la app ahí |
+| GitHub devuelve `404` con URL `github.com/login/oauth/authorize?client_id=...` | El `client_id` está truncado (le falta un carácter al final) | Verificar con `echo $AUTH_GITHUB_CLIENT_ID` dentro del contenedor. Copiar el ID completo y relanzar el contenedor |
+| `401` en `/api/auth/github/refresh` | No hay sesión activa | **Normal antes del login.** No es un error |
+| `302` en `/api/auth/github/start` | Backstage redirige a GitHub OAuth | **Correcto.** Significa que el provider está bien configurado |
+| Error al iniciar sesión después de corregir todo | El Client Secret anterior quedó expuesto | Generar un **nuevo** Client Secret en GitHub OAuth App y actualizar la variable de entorno |
+| `working directory '/app' is invalid` en Docker | Git Bash convierte la ruta `/app` a una ruta de Windows | Usar `//app/backstage` con doble slash en `-w` |
 
 ---
 
