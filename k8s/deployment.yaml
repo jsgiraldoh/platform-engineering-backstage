@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-engineering
+  labels:
+    app: platform-engineering
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: platform-engineering
+  template:
+    metadata:
+      labels:
+        app: platform-engineering
+    spec:
+      containers:
+      - name: platform-engineering
+        image: jsgiraldoh/img-example-platform-eng
+        ports:
+        - containerPort: 80

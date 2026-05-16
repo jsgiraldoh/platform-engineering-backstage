@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-engineering
+spec:
+  selector:
+    app: platform-engineering
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
