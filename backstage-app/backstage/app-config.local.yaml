@@ -1,0 +1,42 @@
+app:
+  baseUrl: http://localhost:3000
+  listen:
+    port: 3000
+    host: 0.0.0.0
+
+backend:
+  auth:
+    keys:
+      - secret: backstage-secret
+
+  baseUrl: http://localhost:7007
+
+  listen:
+    port: 7007
+    host: 0.0.0.0
+
+  cors:
+    origin: http://localhost:3000
+    methods: [GET, HEAD, PATCH, POST, PUT, DELETE]
+    credentials: true
+
+auth:
+  environment: development
+
+  providers:
+    github:
+      development:
+        clientId: ${AUTH_GITHUB_CLIENT_ID}
+        clientSecret: ${AUTH_GITHUB_CLIENT_SECRET}
+
+        signIn:
+          resolvers:
+            - resolver: usernameMatchingUserEntityName
+
+catalog:
+  rules:
+    - allow: [User, Component, System, API, Resource, Location]
+
+  locations:
+    - type: file
+      target: /app/backstage/users/user.yaml
