@@ -22,7 +22,7 @@ backstage-app/backstage/packages/app/dist/
 backstage-app/backstage/packages/backend/dist/
 
 # Backstage local config (contains secrets)
-backstage-app/backstage/app-config.local.yaml
+#backstage-app/backstage/app-config.local.yaml
 
 # Environment files
 .env
